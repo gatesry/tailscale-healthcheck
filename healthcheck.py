@@ -18,7 +18,6 @@ except Exception:  # pragma: no cover - import guard
         return request.remote_addr
 import pytz
 import logging  # Add logging for debugging
-from threading import Timer  # For token renewal
 from urllib3.exceptions import ProtocolError  # Add import for better error handling
 from http.client import RemoteDisconnected  # Add import for better error handling
 import fnmatch  # Add for wildcard pattern matching
@@ -39,10 +38,13 @@ logging.basicConfig(level=get_log_level_from_env())
 app = Flask(__name__)
 app.url_map.strict_slashes = False  # Allow trailing slashes to be ignored
 
-# Load configuration from environment variables
-TAILNET_DOMAIN = os.getenv("TAILNET_DOMAIN", "example.com")  # Default to "example.com"
-TAILSCALE_API_URL = f"https://api.tailscale.com/api/v2/tailnet/{TAILNET_DOMAIN}/devices"
-AUTH_TOKEN = os.getenv("AUTH_TOKEN", "your-default-token")
+# Headscale configuration (no Tailscale SaaS)
+HEADSCALE_API_BASE_URL = os.getenv(
+    "HEADSCALE_API_BASE_URL",
+    os.getenv("TAILSCALE_API_BASE_URL", "http://localhost:8080"),
+).strip().rstrip("/")
+HEADSCALE_USER = os.getenv("HEADSCALE_USER", "").strip()
+HEADSCALE_API_KEY = (os.getenv("HEADSCALE_API_KEY") or os.getenv("AUTH_TOKEN") or "").strip()
 ONLINE_THRESHOLD_MINUTES = int(os.getenv("ONLINE_THRESHOLD_MINUTES", 5))  # Default to 5 minutes
 KEY_THRESHOLD_MINUTES = int(os.getenv("KEY_THRESHOLD_MINUTES", 1440))  # Default to 1440 minutes
 GLOBAL_HEALTHY_THRESHOLD = int(os.getenv("GLOBAL_HEALTHY_THRESHOLD", 100))
@@ -72,10 +74,9 @@ try:
         RATE_LIMIT_GLOBAL_INT = 0
 except Exception:
     RATE_LIMIT_GLOBAL_INT = 0
-RATE_LIMIT_STORAGE_URL = os.getenv(
-    "RATE_LIMIT_STORAGE_URL",
-    "file:///tmp/tailscale-healthcheck-ratelimit.json",
-).strip() or None
+# Default to Flask-Limiter's in-memory backend when available; fall back to file when not.
+_default_rl_storage = "" if _HAVE_FLASK_LIMITER else "file:///tmp/tailscale-healthcheck-ratelimit.json"
+RATE_LIMIT_STORAGE_URL = os.getenv("RATE_LIMIT_STORAGE_URL", _default_rl_storage).strip() or None
 RATE_LIMIT_HEADERS_ENABLED = os.getenv("RATE_LIMIT_HEADERS_ENABLED", "YES").strip().upper() == "YES"
 
 # Initialize rate limiter (no-op if disabled)
@@ -418,81 +419,7 @@ EXCLUDE_IDENTIFIER_UPDATE_HEALTHY = os.getenv("EXCLUDE_IDENTIFIER_UPDATE_HEALTHY
 INCLUDE_TAG_UPDATE_HEALTHY = os.getenv("INCLUDE_TAG_UPDATE_HEALTHY", "").strip()
 EXCLUDE_TAG_UPDATE_HEALTHY = os.getenv("EXCLUDE_TAG_UPDATE_HEALTHY", "").strip()
 
-# Load OAuth configuration from environment variables
-OAUTH_CLIENT_ID = os.getenv("OAUTH_CLIENT_ID")
-OAUTH_CLIENT_SECRET = os.getenv("OAUTH_CLIENT_SECRET")
-
-# Global variable to store the OAuth access token and timer
-ACCESS_TOKEN = None
-TOKEN_RENEWAL_TIMER = None
-
-# Global variable to track if it's the initial token fetch
-IS_INITIAL_FETCH = True
-
-def fetch_oauth_token():
-    """
-    Fetches a new OAuth access token using the client ID and client secret.
-    """
-    global ACCESS_TOKEN, TOKEN_RENEWAL_TIMER, IS_INITIAL_FETCH
-    try:
-        response = requests.post(
-            "https://api.tailscale.com/api/v2/oauth/token",
-            data={
-                "client_id": OAUTH_CLIENT_ID,
-                "client_secret": OAUTH_CLIENT_SECRET
-            },
-            timeout=get_http_timeout()
-        )
-        response.raise_for_status()
-        token_data = response.json()
-        ACCESS_TOKEN = token_data["access_token"]
-        logging.info("Successfully fetched OAuth access token.")
-
-        # Cancel any existing timer before scheduling a new one
-        if TOKEN_RENEWAL_TIMER:
-            TOKEN_RENEWAL_TIMER.cancel()
-
-        # Schedule the next token renewal after 50 minutes
-        TOKEN_RENEWAL_TIMER = Timer(50 * 60, fetch_oauth_token)
-        TOKEN_RENEWAL_TIMER.start()
-
-        # Log the token renewal time only if it's not the initial fetch
-        if not IS_INITIAL_FETCH:
-            try:
-                tz = pytz.timezone(TIMEZONE)
-                renewal_time = datetime.now(tz).isoformat()
-                logging.info(f"OAuth access token renewed at {renewal_time} ({TIMEZONE}).")
-            except pytz.UnknownTimeZoneError:
-                logging.error(f"Unknown timezone: {TIMEZONE}. Logging renewal time in UTC.")
-                logging.info(f"OAuth access token renewed at {datetime.utcnow().isoformat()} UTC.")
-        else:
-            IS_INITIAL_FETCH = False  # Mark the initial fetch as complete
-    except requests.exceptions.Timeout as to_err:
-        logging.warning(f"Timeout during token fetch after {get_http_timeout()}s: {to_err}")
-        ACCESS_TOKEN = None
-    except requests.exceptions.HTTPError as http_err:
-        logging.error(f"HTTP error during token fetch: {http_err}")
-        if response.status_code == 401:
-            logging.error("Unauthorized error (401). Retrying token fetch...")
-            ACCESS_TOKEN = None
-        else:
-            logging.error(f"Unexpected HTTP error: {response.status_code}")
-    except Exception as e:
-        logging.error(f"Failed to fetch OAuth access token: {e}")
-        ACCESS_TOKEN = None
-
-def initialize_oauth():
-    """
-    Initializes OAuth token fetching if OAuth is configured.
-    This function should only be called once during the master process initialization.
-    """
-    if OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET:
-        logging.info("OAuth configuration detected. Fetching initial access token...")
-        fetch_oauth_token()
-
-# Only initialize OAuth in the Gunicorn master process
-if os.getenv("GUNICORN_MASTER_PROCESS", "false").lower() == "true":
-    initialize_oauth()
+ACCESS_TOKEN = None  # Deprecated, unused
 
 # Log the configured timezone
 logging.debug(f"Configured TIMEZONE: {TIMEZONE}")
@@ -597,12 +524,6 @@ def make_authenticated_request(url, headers):
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             response = requests.get(url, headers=headers, timeout=get_http_timeout())
-            if response.status_code == 401:
-                logging.error("Unauthorized error (401). Attempting to refresh OAuth token...")
-                fetch_oauth_token()
-                if ACCESS_TOKEN:
-                    headers["Authorization"] = f"Bearer {ACCESS_TOKEN}"
-                    response = requests.get(url, headers=headers, timeout=get_http_timeout())
             response.raise_for_status()
             return response
         except (RemoteDisconnected, ProtocolError) as e:
@@ -642,27 +563,58 @@ def make_authenticated_request(url, headers):
     )
     raise RuntimeError("Max retries exceeded for authenticated request")
 
-def fetch_devices():
-    """Fetch devices from Tailscale API with optional caching.
+def _map_headscale_node_to_device(node: dict) -> dict:
+    """Map a Headscale node object to the device schema used throughout the app."""
+    node_id = str(node.get("id", ""))
+    name = node.get("name") or node.get("givenName") or f"node-{node_id}"
+    hostname = name.split(".")[0] if name else name
+    last_seen = node.get("lastSeen")
+    if not last_seen:
+        try:
+            last_seen = (
+                datetime.utcnow().replace(tzinfo=pytz.UTC).isoformat().replace("+00:00", "Z")
+                if node.get("online")
+                else "1970-01-01T00:00:00Z"
+            )
+        except Exception:
+            last_seen = "1970-01-01T00:00:00Z"
+    expires = node.get("expiry")
+    tags = []
+    for key in ("validTags", "forcedTags"):
+        v = node.get(key) or []
+        if isinstance(v, list):
+            tags.extend(v)
+    return {
+        "id": node_id,
+        "name": name,
+        "hostname": hostname,
+        "os": node.get("os", ""),
+        "clientVersion": node.get("clientVersion", ""),
+        "updateAvailable": bool(node.get("updateAvailable", False)),
+        "lastSeen": last_seen,
+        "keyExpiryDisabled": False,
+        "expires": expires,
+        "tags": tags,
+    }
 
-    Returns a list/dict payload from the Tailscale API `devices` endpoint.
-    Caches the full HTTP JSON response body under key "devices".
-    """
-    # Try cache first
+def fetch_devices():
+    """Fetch nodes from Headscale API and normalize to device list with optional caching."""
     cached = _cache_get("devices")
     if cached is not None:
         return cached.get("devices", [])
 
-    # Determine the authorization method
-    if OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET and ACCESS_TOKEN:
-        auth_header = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
-    else:
-        auth_header = {"Authorization": f"Bearer {AUTH_TOKEN}"}
-
-    response = make_authenticated_request(TAILSCALE_API_URL, auth_header)
-    payload = response.json()
-    _cache_set("devices", payload)
-    return payload.get("devices", [])
+    url = f"{HEADSCALE_API_BASE_URL}/api/v1/node"
+    if HEADSCALE_USER:
+        url = f"{url}?user={HEADSCALE_USER}"
+    headers = {}
+    if HEADSCALE_API_KEY:
+        headers["Authorization"] = f"Bearer {HEADSCALE_API_KEY}"
+    response = make_authenticated_request(url, headers)
+    payload = response.json() or {}
+    nodes = payload.get("nodes", []) or []
+    devices = [_map_headscale_node_to_device(n) for n in nodes]
+    _cache_set("devices", {"devices": devices})
+    return devices
 
 def _compute_health_summary(devices):
     """Compute normalized device health list and aggregate metrics.
@@ -792,11 +744,10 @@ def _build_settings_dict():
     masked_redis_url = "********" if REDIS_URL else ""
 
     return {
-        "TAILNET_DOMAIN": TAILNET_DOMAIN,
+        "HEADSCALE_API_BASE_URL": HEADSCALE_API_BASE_URL,
+        "HEADSCALE_USER": HEADSCALE_USER or "",
         "LOG_LEVEL": os.getenv("LOG_LEVEL", "INFO"),
-        "OAUTH_CLIENT_ID": OAUTH_CLIENT_ID if OAUTH_CLIENT_ID else "not configured",
-        "OAUTH_CLIENT_SECRET": "********" if OAUTH_CLIENT_SECRET else "not configured",
-        "AUTH_TOKEN": "********" if AUTH_TOKEN and AUTH_TOKEN != "your-default-token" else "not configured",
+        "HEADSCALE_API_KEY": "********" if HEADSCALE_API_KEY else "not configured",
         "HTTP_TIMEOUT": get_http_timeout(),
         "ONLINE_THRESHOLD_MINUTES": ONLINE_THRESHOLD_MINUTES,
         "KEY_THRESHOLD_MINUTES": KEY_THRESHOLD_MINUTES,

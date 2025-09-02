@@ -2,7 +2,7 @@ name: Publish dev image (main)
 
 on:
   workflow_run:
-    workflows: ["Validate PR"]
+    workflows: ["Validate PR&Commits"]
     types: [completed]
 
 permissions:

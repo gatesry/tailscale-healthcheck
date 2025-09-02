@@ -42,6 +42,6 @@
 - Requirements: lint passes, tests added/updated, README or docs updated when behavior/config changes.
 
 ## Security & Configuration Tips
-- Prefer OAuth (`OAUTH_CLIENT_ID/SECRET`) over `AUTH_TOKEN`. Never hardcode secrets.
+- Use a Headscale API key for auth (`HEADSCALE_API_KEY`). Never hardcode secrets.
 - Use `.env` for local dev only; do not commit real credentials.
 - Keep sensitive values masked in logs/output (already supported by the app).

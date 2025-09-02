@@ -321,10 +321,9 @@ The application is configured using environment variables:
 
 | Variable             | Default Value      | Description                                                                 |
 |----------------------|--------------------|-----------------------------------------------------------------------------|
-| `TAILNET_DOMAIN`     | `example.com`     | The Tailscale tailnet domain.                                              |
-| `AUTH_TOKEN`         | None              | The Tailscale API token (required if OAuth is not configured).             |
-| `OAUTH_CLIENT_ID`    | None              | The OAuth client ID (required if using OAuth).                             |
-| `OAUTH_CLIENT_SECRET`| None              | The OAuth client secret (required if using OAuth).                         |
+| `HEADSCALE_API_BASE_URL` | `http://localhost:8080` | Headscale control plane base URL. |
+| `HEADSCALE_API_KEY`  | None              | Headscale API key (Bearer).             |
+| `HEADSCALE_USER`     | ``                | Optional Headscale user/namespace to filter nodes. |
 | `LOG_LEVEL`          | `INFO`            | Root log level. One of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.    |
 | `HTTP_TIMEOUT`       | `10`              | Timeout in seconds applied to all outbound HTTP requests.                  |
 | `MAX_RETRIES`        | `3`               | Maximum total attempts for outbound authenticated requests (bounded).      |
@@ -423,48 +422,9 @@ The API response includes the following health metrics:
 
 These global metrics become false when their respective false counters exceed the GLOBAL_UNHEALTHY_THRESHOLD.
 
-### Using OAuth for Authentication (!RECOMMENDED!)
+### Headscale Compatibility
 
-If you prefer to use OAuth instead of an API token (`AUTH_TOKEN`), configure the following environment variables:
-
-1. **`OAUTH_CLIENT_ID`**: The client ID for your OAuth application.
-2. **`OAUTH_CLIENT_SECRET`**: The client secret for your OAuth application.
-
-When OAuth is configured, the application will automatically fetch an access token from the Tailscale API and use it for authentication. The access token is renewed every 50 minutes to ensure uninterrupted operation. Additionally, the application will immediately refresh the OAuth token upon receiving a 401 Unauthorized error during API requests.
-
-**Note**: If both `AUTH_TOKEN` and OAuth credentials are configured, OAuth will take priority.
-
-**Recommendation**: It is highly recommended to use OAuth for authentication instead of an API token (`AUTH_TOKEN`) for better security and token management.
-
-### Creating a Tailscale OAuth Client
-
-To use OAuth, you need to create a Tailscale OAuth client with the required permissions:
-
-1. Visit the Tailscale Admin Console:  
-   [https://login.tailscale.com/admin/settings/oauth](https://login.tailscale.com/admin/settings/oauth)
-
-2. Click **Create OAuth Client** and configure the following:
-   - **Name**: Provide a descriptive name for the client (e.g., `Tailscale Healthcheck`).
-   - **Permissions**: Grant `read` permissions on `devices:core`.
-
-3. Copy the generated **Client ID** and **Client Secret**.
-
-4. Set the `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` environment variables in your `.env` file or Docker configuration.
-
-**Note**: Ensure the OAuth client credentials are stored securely and not shared publicly.
-
-### Generating the Tailscale API Key
-
-To use this application with an API token, you need to generate a Tailscale API key:
-
-1. Visit the Tailscale Admin Console:  
-   [https://login.tailscale.com/admin/settings/keys](https://login.tailscale.com/admin/settings/keys)
-
-2. Click **Generate Key** and copy the generated API key.
-
-3. Set the API key as the `AUTH_TOKEN` environment variable.
-
-**Note**: Ensure the API key is stored securely and not shared publicly.
+No OAuth is required. Use `HEADSCALE_API_KEY` with Bearer auth and configure `HEADSCALE_API_BASE_URL`. Optional `HEADSCALE_USER` limits results to a specific namespace.
 
 ### Filter Configuration Examples
 
@@ -527,11 +487,11 @@ Note: The container runs as a non-root user (`appuser`, UID 10001) following lea
 
 ### 2. **Run the Docker Container**:
 
-#### Using an API Key
+#### Using Headscale API Key
 ```bash
 docker run -d -p 5000:5000 \
-    -e TAILNET_DOMAIN="example.com" \
-    -e AUTH_TOKEN="your-api-key" \
+    -e HEADSCALE_API_BASE_URL="http://headscale:8080" \
+    -e HEADSCALE_API_KEY="your-headscale-api-key" \
     -e ONLINE_THRESHOLD_MINUTES=5 \
     -e KEY_THRESHOLD_MINUTES=1440 \
     -e GLOBAL_HEALTHY_THRESHOLD=100 \
@@ -558,8 +518,10 @@ docker run -d -p 5000:5000 \
 ```bash
 docker run -d -p 5000:5000 \
     -e TAILNET_DOMAIN="example.com" \
+    -e TAILSCALE_API_BASE_URL="https://api.tailscale.com" \
     -e OAUTH_CLIENT_ID="your-oauth-client-id" \
     -e OAUTH_CLIENT_SECRET="your-oauth-client-secret" \
+    -e OAUTH_TOKEN_URL="https://api.tailscale.com/api/v2/oauth/token" \
     -e ONLINE_THRESHOLD_MINUTES=5 \
     -e KEY_THRESHOLD_MINUTES=1440 \
     -e GLOBAL_HEALTHY_THRESHOLD=100 \
@@ -607,11 +569,11 @@ docker run -d -p 5000:5000 \
 
 ### 2. **Run the Docker Container**:
 
-#### Using an API Key
+#### Using Headscale API Key
 ```bash
 docker run -d -p 5000:5000 \
-    -e TAILNET_DOMAIN="example.com" \
-    -e AUTH_TOKEN="your-api-key" \
+    -e HEADSCALE_API_BASE_URL="http://headscale:8080" \
+    -e HEADSCALE_API_KEY="your-headscale-api-key" \
     -e ONLINE_THRESHOLD_MINUTES=5 \
     -e KEY_THRESHOLD_MINUTES=1440 \
     -e GLOBAL_HEALTHY_THRESHOLD=100 \
@@ -635,40 +597,22 @@ docker run -d -p 5000:5000 \
     --name tailscale-healthcheck laitco/tailscale-healthcheck:latest
 ```
 
-#### Using OAuth
-```bash
-docker run -d -p 5000:5000 \
-    -e TAILNET_DOMAIN="example.com" \
-    -e OAUTH_CLIENT_ID="your-oauth-client-id" \
-    -e OAUTH_CLIENT_SECRET="your-oauth-client-secret" \
-    -e ONLINE_THRESHOLD_MINUTES=5 \
-    -e KEY_THRESHOLD_MINUTES=1440 \
-    -e GLOBAL_HEALTHY_THRESHOLD=100 \
-    -e GLOBAL_ONLINE_HEALTHY_THRESHOLD=100 \
-    -e GLOBAL_KEY_HEALTHY_THRESHOLD=100 \
-    -e GLOBAL_UPDATE_HEALTHY_THRESHOLD=100 \
-    -e UPDATE_HEALTHY_IS_INCLUDED_IN_HEALTH=NO \
-    -e DISPLAY_SETTINGS_IN_OUTPUT=NO \
-    -e PORT=5000 \
-    -e TIMEZONE="Europe/Berlin" \
-    -e INCLUDE_OS="" \
-    -e EXCLUDE_OS="" \
-    -e INCLUDE_IDENTIFIER="" \
-    -e EXCLUDE_IDENTIFIER="" \
-    -e INCLUDE_TAGS="" \
-    -e EXCLUDE_TAGS="" \
-    -e INCLUDE_IDENTIFIER_UPDATE_HEALTHY="" \
-    -e EXCLUDE_IDENTIFIER_UPDATE_HEALTHY="" \
-    -e INCLUDE_TAG_UPDATE_HEALTHY="" \
-    -e EXCLUDE_TAG_UPDATE_HEALTHY="" \
-    --name tailscale-healthcheck laitco/tailscale-healthcheck:latest
-```
+####
 
 ### 3. **Access the Application**:
    Open your browser and navigate to:
    ```
-   http://IP-ADDRESS_OR_HOSTNAME:5000/health
-   ```
+http://IP-ADDRESS_OR_HOSTNAME:5000/health
+```
+
+### Headscale / Custom Control Plane
+
+This app targets Headscale. Configure:
+- `HEADSCALE_API_BASE_URL`, e.g., `http://headscale:8080`
+- `HEADSCALE_API_KEY` for Bearer auth
+- Optional `HEADSCALE_USER` filter
+
+The app calls `GET ${HEADSCALE_API_BASE_URL}/api/v1/node[?user=${HEADSCALE_USER}]` and maps the response to the device schema used by the endpoints and UI.
 
 ## 📡 Integration with Gatus Monitoring System
 

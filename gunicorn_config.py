@@ -1,6 +1,5 @@
 import os
 import logging
-from healthcheck import initialize_oauth  # Import the OAuth initialization function
 
 # Configure logging with safe default (INFO) and env override
 def _get_log_level_from_env(default=logging.INFO):
@@ -14,14 +13,8 @@ timeout = int(os.getenv("GUNICORN_TIMEOUT", 120))  # Default timeout to 120 seco
 graceful_timeout = int(os.getenv("GUNICORN_GRACEFUL_TIMEOUT", 120))  # Default graceful timeout to 120 seconds
 
 def on_starting(server):
-    """
-    Hook that runs only in the Gunicorn master process.
-    """
-    if os.getenv("OAUTH_CLIENT_ID") and os.getenv("OAUTH_CLIENT_SECRET"):
-        logging.info("Gunicorn master process starting. Initializing OAuth...")
-        initialize_oauth()
-    else:
-        logging.info("Gunicorn master process starting. Using AUTH_TOKEN for authentication. Skipping OAuth initialization.")
+    """Hook that runs only in the Gunicorn master process."""
+    logging.info("Gunicorn master process starting. No OAuth initialization (Headscale mode).")
 
 def worker_exit(server, worker):
     """

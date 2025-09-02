@@ -86,7 +86,7 @@ def test_dashboard_settings_render_when_enabled():
         "ONLINE_THRESHOLD_MINUTES": "5",
         "KEY_THRESHOLD_MINUTES": "1440",
         "RATE_LIMIT_ENABLED": "NO",
-        "TAILNET_DOMAIN": "example.com",
+        "HEADSCALE_API_BASE_URL": "http://hs:8080",
     })
     m.fetch_devices = lambda: _sample_devices()
     client = m.app.test_client()
@@ -94,7 +94,7 @@ def test_dashboard_settings_render_when_enabled():
     assert resp.status_code == 200
     html = resp.get_data(as_text=True)
     assert "Settings (redacted)" in html
-    assert "TAILNET_DOMAIN" in html
+    assert "HEADSCALE_API_BASE_URL" in html
     assert "RATE_LIMIT_ENABLED" in html
 
 

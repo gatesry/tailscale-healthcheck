@@ -25,8 +25,8 @@ RUN chown -R appuser:app /app
 # Expose the port the app runs on
 EXPOSE 5000
 
-# Define default environment variables
-ENV TAILNET_DOMAIN=example.com
+# Define default environment variables (Headscale)
+ENV HEADSCALE_API_BASE_URL=http://localhost:8080
 ENV ONLINE_THRESHOLD_MINUTES=5
 ENV KEY_THRESHOLD_MINUTES=1440
 ENV GLOBAL_HEALTHY_THRESHOLD=100
@@ -49,6 +49,7 @@ ENV INCLUDE_TAG_UPDATE_HEALTHY=""
 ENV EXCLUDE_TAG_UPDATE_HEALTHY=""
 ENV GUNICORN_TIMEOUT=120
 ENV GUNICORN_GRACEFUL_TIMEOUT=120
+# No OAuth in Headscale mode
 
 # Remove AUTH_TOKEN from here to avoid storing sensitive data in the image
 

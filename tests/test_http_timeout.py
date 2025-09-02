@@ -46,11 +46,11 @@ def test_make_authenticated_request_uses_timeout(monkeypatch):
     assert calls.get("timeout") == module.get_http_timeout()
 
 
-def test_fetch_oauth_token_uses_timeout(monkeypatch):
+def test_headscale_get_uses_timeout(monkeypatch):
     module = _load_healthcheck_with_env({
         "HTTP_TIMEOUT": "7",
-        "OAUTH_CLIENT_ID": "abc",
-        "OAUTH_CLIENT_SECRET": "def",
+        "HEADSCALE_API_BASE_URL": "http://hs:8080",
+        "CACHE_ENABLED": "NO",
     })
 
     calls = {}
@@ -62,28 +62,16 @@ def test_fetch_oauth_token_uses_timeout(monkeypatch):
             return None
 
         def json(self):
-            return {"access_token": "token123"}
+            return {"nodes": []}
 
-    def fake_post(url, data=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None):
         calls["timeout"] = timeout
         return DummyResponse()
 
-    class NoopTimer:
-        def __init__(self, *_args, **_kwargs):
-            pass
+    monkeypatch.setattr(module.requests, "get", fake_get)
 
-        def start(self):
-            return None
-
-        def cancel(self):
-            return None
-
-    monkeypatch.setattr(module, "Timer", NoopTimer)
-    monkeypatch.setattr(module.requests, "post", fake_post)
-
-    module.fetch_oauth_token()
+    module.fetch_devices()
     assert calls.get("timeout") == module.get_http_timeout()
-    assert module.ACCESS_TOKEN == "token123"
 
 
 def test_health_endpoint_times_out_gracefully(monkeypatch):

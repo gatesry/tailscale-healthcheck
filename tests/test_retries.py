@@ -82,38 +82,24 @@ def test_exponential_backoff_called_between_attempts(monkeypatch):
     assert abs(calls["sleeps"][1] - 2.0) < 1e-6
 
 
-def test_unauthorized_401_refreshes_token_and_succeeds(monkeypatch):
+def test_unauthorized_401_propagates(monkeypatch):
     module = _load_healthcheck_with_env({
-        "MAX_RETRIES": "2",
+        "MAX_RETRIES": "1",
     })
 
     class DummyResponse:
-        def __init__(self, code):
-            self.status_code = code
+        status_code = 401
 
         def raise_for_status(self):
-            if self.status_code >= 400:
-                raise Exception(f"HTTP {self.status_code}")
-
-        def json(self):
-            return {}
-
-    calls = {"count": 0}
+            raise Exception("HTTP 401")
 
     def fake_get(url, headers=None, timeout=None):
-        calls["count"] += 1
-        # First call unauthorized, second succeeds
-        return DummyResponse(401 if calls["count"] == 1 else 200)
-
-    def fake_fetch_token():
-        module.ACCESS_TOKEN = "newtoken"
+        return DummyResponse()
 
     monkeypatch.setattr(module.requests, "get", fake_get)
-    monkeypatch.setattr(module, "fetch_oauth_token", fake_fetch_token)
 
-    resp = module.make_authenticated_request("https://example.invalid", {"Authorization": "Bearer x"})
-    assert isinstance(resp, DummyResponse)
-    assert resp.status_code == 200
-    # Should only be a single attempt with one inline retry due to 401
-    assert calls["count"] == 2
-
+    try:
+        module.make_authenticated_request("https://example.invalid", {"Authorization": "Bearer x"})
+        assert False, "expected exception for 401"
+    except Exception as e:
+        assert "401" in str(e)

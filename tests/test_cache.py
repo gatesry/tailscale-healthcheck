@@ -20,18 +20,15 @@ def _load_healthcheck_with_env(env: dict) -> types.ModuleType:
     return module
 
 
-def _dummy_devices_payload():
+def _dummy_nodes_payload():
     return {
-        "devices": [
+        "nodes": [
             {
-                "id": "id-1",
+                "id": "1",
                 "name": "host1.example",
-                "hostname": "host1",
-                "os": "linux",
                 "lastSeen": "2099-01-01T00:00:00Z",
-                "tags": ["tag:user"],
-                "updateAvailable": False,
-                "keyExpiryDisabled": True,
+                "validTags": ["tag:user"],
+                "expiry": "2099-12-31T00:00:00Z",
             }
         ]
     }
@@ -52,7 +49,7 @@ def test_cache_disabled_calls_api_each_time(monkeypatch):
             return None
 
         def json(self):
-            return _dummy_devices_payload()
+            return _dummy_nodes_payload()
 
     def fake_get(url, headers=None, timeout=None):
         calls["count"] += 1
@@ -84,7 +81,7 @@ def test_cache_enabled_hits_once_within_ttl(monkeypatch):
             return None
 
         def json(self):
-            return _dummy_devices_payload()
+            return _dummy_nodes_payload()
 
     def fake_get(url, headers=None, timeout=None):
         calls["count"] += 1
@@ -124,7 +121,7 @@ def test_cache_expires_then_refreshes(monkeypatch):
             return None
 
         def json(self):
-            return _dummy_devices_payload()
+            return _dummy_nodes_payload()
 
     def fake_get(url, headers=None, timeout=None):
         calls["count"] += 1
@@ -167,7 +164,7 @@ def test_cache_invalidate_endpoint(monkeypatch):
             return None
 
         def json(self):
-            return _dummy_devices_payload()
+            return _dummy_nodes_payload()
 
     def fake_get(url, headers=None, timeout=None):
         calls["count"] += 1
@@ -215,7 +212,7 @@ def test_file_cache_backend_shares_via_file(monkeypatch, tmp_path):
             return None
 
         def json(self):
-            return _dummy_devices_payload()
+            return _dummy_nodes_payload()
 
     def fake_get(url, headers=None, timeout=None):
         calls["count"] += 1
